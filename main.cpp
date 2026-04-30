@@ -1,131 +1,110 @@
-
 #include <iostream>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include "ecc.h"
+
 using namespace std;
 
-const int a = 2;
-const int b = 3;
-const int p = 97;
-
-struct Point
+int main(int argc, char* argv[])
 {
-    int x;
-    int y;
-    bool infinity;
-};
+    string role = (argc > 1) ? argv[1] : "client";
 
-Point INF = {0,0,true};
+    cout << "[CLIENT] Started as " << role << "\n";
 
-int mod(int x)
-{
-    x %= p;
-    if(x < 0) x += p;
-    return x;
-}
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
 
-int modInverse(int n)
-{
-    int t = 0, newt = 1;
-    int r = p, newr = mod(n);
+    sockaddr_in server{};
+    server.sin_family = AF_INET;
+    server.sin_port = htons(8080);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    while(newr != 0)
+    cout << "[CLIENT] Connecting...\n";
+
+    if(connect(sock, (sockaddr*)&server, sizeof(server)) < 0)
     {
-        int q = r / newr;
-
-        int temp = newt;
-        newt = t - q * newt;
-        t = temp;
-
-        temp = newr;
-        newr = r - q * newr;
-        r = temp;
+        cout << "[ERROR] Connection failed\n";
+        return 0;
     }
 
-    if(t < 0) t += p;
-    return t;
-}
+    cout << "[CLIENT] Connected to server\n";
 
-void printPoint(Point P)
-{
-    if(P.infinity) cout << "INF";
-    else cout << "(" << P.x << "," << P.y << ")";
-}
+    // ---------------- PRIVATE KEY ----------------
+    int priv;
+    cout << "Enter private key: ";
+    cin >> priv;
 
-Point add(Point P, Point Q)
-{
-    if(P.infinity) return Q;
-    if(Q.infinity) return P;
+    cout << "[ECC] Private key = " << priv << "\n";
 
-    if(P.x == Q.x && mod(P.y + Q.y) == 0)
-        return INF;
+    Point G = {3,6,false};
 
-    int lambda;
+    // ---------------- PUBLIC KEY ----------------
+    Point pub = multiply(G, priv);
+    cout << "[ECC] Public key = (" << pub.x << "," << pub.y << ")\n";
 
-    if(P.x == Q.x && P.y == Q.y)
+    int pubArr[2] = {pub.x, pub.y};
+
+    cout << "[CLIENT] Sending public key...\n";
+    send(sock, pubArr, sizeof(pubArr), 0);
+
+    // ---------------- RECEIVE KEY ----------------
+    int other[2];
+
+    cout << "[CLIENT] Waiting for other public key...\n";
+    recv(sock, other, sizeof(other), 0);
+
+    Point otherPub = {other[0], other[1], false};
+
+    cout << "[CLIENT] Received public key = ("
+         << otherPub.x << "," << otherPub.y << ")\n";
+
+    // ---------------- SHARED SECRET ----------------
+    Point shared = multiply(otherPub, priv);
+
+    cout << "[ECC] Shared secret = (" 
+         << shared.x << "," << shared.y << ")\n";
+
+    int key = shared.x;
+
+    cout << "[ECC] Derived key = " << key << "\n";
+
+    cin.ignore();
+
+    // ---------------- MESSAGE ----------------
+    if(role == "alice")
     {
-        int num = mod(3 * P.x * P.x + a);
-        int den = modInverse(2 * P.y);
-        lambda = mod(num * den);
+        string msg;
+        cout << "Enter message: ";
+        getline(cin, msg);
+
+        cout << "[ENC] Original: " << msg << "\n";
+
+        for(char &c : msg)
+            c ^= key;
+
+        cout << "[CLIENT] Sending encrypted message...\n";
+
+        send(sock, msg.c_str(), msg.size(), 0);
     }
     else
     {
-        int num = mod(Q.y - P.y);
-        int den = modInverse(Q.x - P.x);
-        lambda = mod(num * den);
+        char buffer[1024];
+
+        cout << "[CLIENT] Waiting for message...\n";
+        recv(sock, buffer, sizeof(buffer), 0);
+
+        string msg(buffer);
+
+        cout << "[ENC] Encrypted received: " << msg << "\n";
+
+        for(char &c : msg)
+            c ^= key;
+
+        cout << "[DEC] Decrypted message: " << msg << "\n";
     }
 
-    int xr = mod(lambda * lambda - P.x - Q.x);
-    int yr = mod(lambda * (P.x - xr) - P.y);
+    close(sock);
 
-    return {xr, yr, false};
+    cout << "[CLIENT] Done\n";
+    return 0;
 }
-
-Point scalarMultiply(Point P, int k)
-{
-    Point result = INF;
-    Point current = P;
-
-    while(k > 0)
-    {
-        if(k % 2 == 1)
-            result = add(result, current);
-
-        current = add(current, current);
-        k /= 2;
-    }
-
-    return result;
-}
-
-int main()
-{
-    Point G = {3,6,false};
-
-    int alicePrivate = 7;
-    int bobPrivate   = 11;
-
-    Point alicePublic = scalarMultiply(G, alicePrivate);
-    Point bobPublic   = scalarMultiply(G, bobPrivate);
-
-    Point aliceShared = scalarMultiply(bobPublic, alicePrivate);
-    Point bobShared   = scalarMultiply(alicePublic, bobPrivate);
-
-    cout << "Base Point G = ";
-    printPoint(G);
-
-    cout << "\n\nAlice Private Key = " << alicePrivate;
-    cout << "\nAlice Public Key = ";
-    printPoint(alicePublic);
-
-    cout << "\n\nBob Private Key = " << bobPrivate;
-    cout << "\nBob Public Key = ";
-    printPoint(bobPublic);
-
-    cout << "\n\nAlice Shared Secret = ";
-    printPoint(aliceShared);
-
-    cout << "\nBob Shared Secret = ";
-    printPoint(bobShared);
-
-    cout << endl;
-}
-a
