@@ -2,12 +2,21 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <string.h>
 #include "ecc.h"
 
 using namespace std;
 
-int main()
+int main(int argc, char* argv[])
 {
+    if(argc < 2)
+    {
+        cout << "Usage: ./client <alice|bob>\n";
+        return 0;
+    }
+
+    string role = argv[1];
+
     int sock = socket(AF_INET, SOCK_STREAM, 0);
 
     sockaddr_in server;
@@ -17,13 +26,13 @@ int main()
 
     connect(sock, (sockaddr*)&server, sizeof(server));
 
-    cout << "Connected to server\n";
+    cout << role << " connected\n";
 
     int priv;
     cout << "Enter private key: ";
     cin >> priv;
 
-    Point G = {3, 6, false};
+    Point G = {3,6,false};
 
     Point pub = multiply(G, priv);
     int pubArr[2] = {pub.x, pub.y};
@@ -36,23 +45,31 @@ int main()
     Point otherPub = {other[0], other[1], false};
 
     Point shared = multiply(otherPub, priv);
-
-    cout << "Shared secret: (" << shared.x << "," << shared.y << ")\n";
-
     int key = shared.x;
 
     cin.ignore();
     string msg;
 
-    cout << "Enter message: ";
-    getline(cin, msg);
+    if(role == "alice")
+    {
+        cout << "Alice send message: ";
+        getline(cin, msg);
 
-    for(char &c : msg)
-        c ^= key;
+        for(char &c : msg) c ^= key;
 
-    send(sock, msg.c_str(), msg.size(), 0);
+        send(sock, msg.c_str(), msg.size(), 0);
+    }
+    else
+    {
+        char buffer[1024];
+        recv(sock, buffer, sizeof(buffer), 0);
 
-    cout << "Encrypted message sent\n";
+        string received(buffer);
+
+        for(char &c : received) c ^= key;
+
+        cout << "Bob received: " << received << endl;
+    }
 
     close(sock);
     return 0;
