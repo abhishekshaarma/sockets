@@ -2,54 +2,129 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <string.h>
+#include "ecc.h"
 
 using namespace std;
 
-int main()
+int main(int argc, char* argv[])
 {
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    string role = (argc > 1) ? argv[1] : "alice";
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(8080);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
 
-    bind(server_fd, (sockaddr*)&addr, sizeof(addr));
-    listen(server_fd, 2);
+    sockaddr_in server{};
+    server.sin_family = AF_INET;
+    server.sin_port = htons(8080);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    cout << "[SERVER] Waiting for clients...\n";
+    connect(sock, (sockaddr*)&server, sizeof(server));
 
-    int A = accept(server_fd, NULL, NULL);
-    cout << "[SERVER] Alice connected\n";
+    cout << "[" << role << "] Connected\n";
 
-    int B = accept(server_fd, NULL, NULL);
-    cout << "[SERVER] Bob connected\n";
+    // ---------------- ECC SETUP ----------------
+    int priv;
+    cout << "Enter private key: ";
+    cin >> priv;
 
-    int alicePub[2], bobPub[2];
+    Point G = {3,6,false};
+    Point pub = multiply(G, priv);
 
-    cout << "[SERVER] Receiving public keys...\n";
+    int pubArr[2] = {pub.x, pub.y};
+    send(sock, pubArr, sizeof(pubArr), 0);
 
-    recv(A, alicePub, sizeof(alicePub), 0);
-    recv(B, bobPub, sizeof(bobPub), 0);
+    int other[2];
+    recv(sock, other, sizeof(other), 0);
 
-    cout << "[SERVER] Exchanging keys...\n";
+    Point otherPub = {other[0], other[1], false};
+    Point shared = multiply(otherPub, priv);
 
-    send(A, bobPub, sizeof(bobPub), 0);
-    send(B, alicePub, sizeof(alicePub), 0);
+    int key = shared.x;
 
-    cout << "[SERVER] Keys exchanged successfully\n";
+    cout << "[ECC] Shared key = " << key << "\n";
+
+    cin.ignore();
 
     char buffer[1024];
 
-    recv(A, buffer, sizeof(buffer), 0);
-    cout << "[SERVER] Message received from Alice\n";
+    // ---------------- CHAT LOOP ----------------
+    while(true)
+    {
+        if(role == "alice")
+        {
+            string msg;
+            cout << "Alice > ";
+            getline(cin, msg);
 
-    send(B, buffer, sizeof(buffer), 0);
-    cout << "[SERVER] Message forwarded to Bob\n";
+            if(msg == "exit")
+            {
+                send(sock, "EXIT", 4, 0);
+                break;
+            }
 
-    close(A);
-    close(B);
-    close(server_fd);
+            for(char &c : msg)
+                c ^= key;
+
+            string packet = "MSG:" + msg;
+            send(sock, packet.c_str(), packet.size(), 0);
+
+            cout << "[sent]\n";
+
+            // receive reply
+            recv(sock, buffer, sizeof(buffer), 0);
+            string reply(buffer);
+
+            if(reply == "EXIT") break;
+
+            if(reply.find("MSG:") == 0)
+            {
+                reply = reply.substr(4);
+
+                for(char &c : reply)
+                    c ^= key;
+
+                cout << "Bob > " << reply << endl;
+            }
+        }
+        else // BOB
+        {
+            cout << "Waiting for Alice...\n";
+
+            recv(sock, buffer, sizeof(buffer), 0);
+            string msg(buffer);
+
+            if(msg == "EXIT") break;
+
+            if(msg.find("MSG:") == 0)
+            {
+                msg = msg.substr(4);
+
+                for(char &c : msg)
+                    c ^= key;
+
+                cout << "Alice > " << msg << endl;
+            }
+
+            string reply;
+            cout << "Bob > ";
+            getline(cin, reply);
+
+            if(reply == "exit")
+            {
+                send(sock, "EXIT", 4, 0);
+                break;
+            }
+
+            for(char &c : reply)
+                c ^= key;
+
+            string packet = "MSG:" + reply;
+            send(sock, packet.c_str(), packet.size(), 0);
+        }
+    }
+
+    close(sock);
+    cout << "[" << role << "] Disconnected\n";
 
     return 0;
 }
