@@ -2,61 +2,58 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include "ecc.h"
+
 using namespace std;
 
 int main()
 {
-    int server_fd, client1, client2;
-    sockaddr_in address;
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
 
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in server;
+    server.sin_family = AF_INET;
+    server.sin_port = htons(8080);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(8080);
+    connect(sock, (sockaddr*)&server, sizeof(server));
 
-    bind(server_fd, (sockaddr*)&address, sizeof(address));
-    listen(server_fd, 2);
+    cout << "Connected to server\n";
 
-    cout << "Server started on port 8080...\n";
-    cout << "Waiting for Alice...\n";
+    int priv;
+    cout << "Enter private key: ";
+    cin >> priv;
 
-    client1 = accept(server_fd, nullptr, nullptr);
-    cout << "Alice connected.\n";
+    Point G = {3, 6, false};
 
-    cout << "Waiting for Bob...\n";
-    client2 = accept(server_fd, nullptr, nullptr);
-    cout << "Bob connected.\n";
+    Point pub = multiply(G, priv);
+    int pubArr[2] = {pub.x, pub.y};
 
-    // receive Alice public key
-    int aliceKey[2];
-    recv(client1, aliceKey, sizeof(aliceKey), 0);
+    send(sock, pubArr, sizeof(pubArr), 0);
 
-    // receive Bob public key
-    int bobKey[2];
-    recv(client2, bobKey, sizeof(bobKey), 0);
+    int other[2];
+    recv(sock, other, sizeof(other), 0);
 
-    // send Bob key to Alice
-    send(client1, bobKey, sizeof(bobKey), 0);
+    Point otherPub = {other[0], other[1], false};
 
-    // send Alice key to Bob
-    send(client2, aliceKey, sizeof(aliceKey), 0);
+    Point shared = multiply(otherPub, priv);
 
-    cout << "\nPublic keys exchanged.\n";
+    cout << "Shared secret: (" << shared.x << "," << shared.y << ")\n";
 
-    char buffer[1024];
+    int key = shared.x;
 
-    // receive encrypted msg from Alice
-    recv(client1, buffer, sizeof(buffer), 0);
+    cin.ignore();
+    string msg;
 
-    // forward to Bob
-    send(client2, buffer, sizeof(buffer), 0);
+    cout << "Enter message: ";
+    getline(cin, msg);
 
-    cout << "Encrypted message forwarded.\n";
+    for(char &c : msg)
+        c ^= key;
 
-    close(client1);
-    close(client2);
-    close(server_fd);
+    send(sock, msg.c_str(), msg.size(), 0);
 
+    cout << "Encrypted message sent\n";
+
+    close(sock);
     return 0;
 }
