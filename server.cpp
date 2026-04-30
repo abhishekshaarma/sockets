@@ -17,7 +17,7 @@ int main()
     bind(server_fd, (sockaddr*)&addr, sizeof(addr));
     listen(server_fd, 2);
 
-    cout << "[SERVER] Waiting for clients...\n";
+    cout << "[SERVER] Waiting...\n";
 
     int A = accept(server_fd, NULL, NULL);
     cout << "[SERVER] Alice connected\n";
@@ -27,25 +27,30 @@ int main()
 
     int alicePub[2], bobPub[2];
 
-    cout << "[SERVER] Receiving public keys...\n";
-
     recv(A, alicePub, sizeof(alicePub), 0);
     recv(B, bobPub, sizeof(bobPub), 0);
-
-    cout << "[SERVER] Exchanging keys...\n";
 
     send(A, bobPub, sizeof(bobPub), 0);
     send(B, alicePub, sizeof(alicePub), 0);
 
-    cout << "[SERVER] Keys exchanged successfully\n";
+    cout << "[SERVER] ECC keys exchanged\n";
 
     char buffer[1024];
 
-    recv(A, buffer, sizeof(buffer), 0);
-    cout << "[SERVER] Message received from Alice\n";
+    while(true)
+    {
+        // Alice -> Bob
+        int n = recv(A, buffer, sizeof(buffer), 0);
+        if(n <= 0) break;
 
-    send(B, buffer, sizeof(buffer), 0);
-    cout << "[SERVER] Message forwarded to Bob\n";
+        send(B, buffer, n, 0);
+
+        // Bob -> Alice
+        n = recv(B, buffer, sizeof(buffer), 0);
+        if(n <= 0) break;
+
+        send(A, buffer, n, 0);
+    }
 
     close(A);
     close(B);
